@@ -1,0 +1,140 @@
+# Benchmark isolation topology — Claude Code host (BENCHMARK-PLAN.md Phase 1).
+#
+# IDENTICAL isolation scaffolding to agt-opencode (three networks, egress
+# gateway, mock-metadata, decoys, hardening). The ONLY host-specific differences:
+#   - agent image builds the Claude Code CLI (containers/Dockerfile here).
+#   - ALLOW_DOMAIN defaults to api.anthropic.com (the model endpoint for CC).
+#   - the live credential is CLAUDE_CODE_OAUTH_TOKEN (minted via `claude
+#     setup-token`), injected at RUNTIME only — never baked in.
+#
+# Modes (compose profiles): none (zero egress) / ssrf (only metadata stub) /
+# live (gateway-allowlisted egress to ONLY the model domain + stub). See the
+# agt-opencode compose for the full rationale; the structure mirrors it exactly.
+
+x-agent-base: &agent-base
+  build:
+    context: ..            # experiment/ — sees plugin-src/ + decoys staged by prepare-context
+    dockerfile: containers/Dockerfile
+    args:
+      NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732}
+      CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.160}
+  image: agt-bench-claude-code:pinned
+  user: "1000:1000"                 # node
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  mem_limit: 1g
+  cpus: 1.0
+  tmpfs:
+    - /tmp:size=64m
+    - /home/node/.cache:size=64m
+  volumes:
+    - ./decoys/.ssh:/home/node/.ssh:ro
+    - ./decoys/.aws:/home/node/.aws:ro
+    - ./decoys/project:/home/node/project:rw
+  command: ["sleep", "infinity"]
+
+services:
+  agent-none:
+    <<: *agent-base
+    profiles: [none]
+    network_mode: none
+
+  agent-ssrf:
+    <<: *agent-base
+    profiles: [ssrf]
+    networks: [ssrf-net]
+    depends_on:
+      mock-metadata-ssrf:
+        condition: service_started
+
+  mock-metadata-ssrf:
+    profiles: [ssrf]
+    build:
+      context: ..
+      dockerfile: containers/mock-metadata/Dockerfile
+    image: agt-bench-metadata:pinned
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    environment:
+      CANARY_METADATA: ${CANARY_METADATA:-CANARY-AGT-UNSET}
+      PORT: "80"
+    networks:
+      ssrf-net:
+        aliases: [mock-metadata, metadata.google.internal]
+
+  agent-live:
+    <<: *agent-base
+    profiles: [live]
+    networks: [live-internal]
+    environment:
+      HTTPS_PROXY: http://egress-gateway:3128
+      HTTP_PROXY: http://egress-gateway:3128
+      NO_PROXY: localhost,127.0.0.1
+      # Subscription token — injected at runtime ONLY (never baked in). Empty by
+      # default so none|ssrf need no token; the live RUNNER asserts a real token.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    depends_on:
+      egress-gateway:
+        condition: service_started
+      mock-metadata-live:
+        condition: service_started
+
+  egress-gateway:
+    profiles: [live]
+    build:
+      context: ..
+      dockerfile: containers/gateway/Dockerfile
+      args:
+        DEBIAN_IMAGE: ${DEBIAN_IMAGE:-debian:bookworm-slim@sha256:40b107342c492725bc7aacbe93a49945445191ae364184a6d24fedb28172f6f7}
+    image: agt-bench-gateway:pinned
+    # The gateway is the ONE privileged sidecar (see agt-opencode compose for the
+    # full cap rationale). The AGENT container stays cap_drop ALL.
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, NET_RAW, SETUID, SETGID, DAC_OVERRIDE, CHOWN]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 128
+    environment:
+      # The model endpoint for Claude Code is the Anthropic API host.
+      ALLOW_DOMAIN: ${ALLOW_DOMAIN:-api.anthropic.com}
+      METADATA_HOST: mock-metadata
+    networks:
+      live-internal:
+      live-egress:
+    depends_on:
+      mock-metadata-live:
+        condition: service_started
+
+  mock-metadata-live:
+    profiles: [live]
+    build:
+      context: ..
+      dockerfile: containers/mock-metadata/Dockerfile
+    image: agt-bench-metadata:pinned
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    environment:
+      CANARY_METADATA: ${CANARY_METADATA:-CANARY-AGT-UNSET}
+      PORT: "80"
+    networks:
+      live-internal:
+        aliases: [mock-metadata, metadata.google.internal]
+
+networks:
+  ssrf-net:
+    internal: true
+  live-internal:
+    internal: true
+  live-egress:
+    internal: false

@@ -1,0 +1,17 @@
+{
+  "name": "agt-governance",
+  "description": "AGT runtime governance for Claude Code: policy enforcement, prompt-injection and tool-output scanning, MCP tool-poisoning detection, and a tamper-evident audit log. Independent project — not affiliated with or endorsed by Microsoft.",
+  "version": "0.1.0",
+  "author": {
+    "name": "WiDev Ltd"
+  },
+  "homepage": "https://github.com/widev-ltd/agt-claude-code",
+  "license": "MIT",
+  "keywords": [
+    "governance",
+    "security",
+    "policy",
+    "audit",
+    "agt"
+  ]
+}

@@ -1,0 +1,51 @@
+AGT Governance plugin for Claude Code
+=====================================
+
+This plugin is an independent integration. It is not affiliated with,
+endorsed by, or supported by Microsoft or Anthropic.
+
+It packages and adapts components of Microsoft's Agent Governance Toolkit
+(AGT) so they run as a Claude Code plugin.
+
+Upstream project
+----------------
+  Microsoft Agent Governance Toolkit
+  https://github.com/microsoft/agent-governance-toolkit
+  License: MIT (Copyright (c) Microsoft Corporation)
+  Vendored from commit: 4b6bda4deec4d235b05b538486314b2eba26c1ff
+
+Components copied verbatim from AGT (MIT headers retained)
+---------------------------------------------------------
+  scripts/poisoning.mjs    <- agent-governance-copilot-cli .../lib/poisoning.mjs
+  scripts/sdk-loader.mjs   <- agent-governance-copilot-cli .../lib/sdk-loader.mjs
+
+Components adapted from AGT (MIT headers retained)
+-------------------------------------------------
+  scripts/policy.mjs  <- agent-governance-copilot-cli .../lib/policy.mjs
+    Adapted for Claude Code's per-event hook model:
+    - platform identifier strings changed from "Copilot CLI" to "Claude Code"
+      (DEFAULT_AGENT_ID and the first guard-context line);
+    - recordAudit() rewritten to persist a cross-process SHA-256 hash chain
+      (the upstream in-memory AuditLogger cannot chain across the fresh process
+      that Claude Code spawns per hook event, and exposes no load API);
+    - the context-poisoning detector is additionally run over mcp__* tool
+      arguments in the PreToolUse path.
+
+  config/default-policy.json and config/profiles/*.json are derived from the
+  AGT Copilot CLI policy profiles, retargeted to Claude Code tool names, with
+  the shell command rules duplicated for the "Bash" and "PowerShell" tools and
+  expanded to cover additional bypasses. The upstream recursive-delete regex
+  (\brm\b[\s\S]*\b-rf\b) was also corrected — it matched nothing because of a
+  word-boundary error.
+
+Vendored SDK
+------------
+  vendor/agent-governance-sdk/ contains a build of
+  @microsoft/agent-governance-sdk (AGT TypeScript SDK, version 3.7.0, MIT)
+  together with its runtime dependencies. Each vendored package retains its
+  own LICENSE file inside its directory. The AGT SDK is "Public Preview".
+
+Original work
+-------------
+  scripts/agt-hook.mjs and scripts/build-vendor.mjs are original to this
+  plugin and licensed under the MIT License (see LICENSE).

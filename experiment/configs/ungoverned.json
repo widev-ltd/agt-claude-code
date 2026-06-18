@@ -1,0 +1,14 @@
+{
+  "_config": "ungoverned",
+  "_host": "cc",
+  "_doc": "Baseline: Claude Code with NO governance. Plugin hooks OFF (agt-governance plugin not installed), permissions in bypass posture so nothing is denied or asked. Establishes the unprevented-violation floor. Run live via `claude -p --output-format stream-json` with permission-mode bypassPermissions; no deny list.",
+  "plugin_enabled": false,
+  "settings": {
+    "permissions": {
+      "defaultMode": "bypassPermissions",
+      "deny": [],
+      "ask": [],
+      "allow": []
+    }
+  }
+}

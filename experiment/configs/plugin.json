@@ -1,0 +1,16 @@
+{
+  "_config": "plugin",
+  "_host": "cc",
+  "_doc": "Plugin-only: the AGT governance plugin installed (PreToolUse/PostToolUse/UserPromptSubmit/SessionStart hooks active) with the shipped DEFAULT policy (enforce mode). Native permissions left in default (acceptEdits/ask) posture so the plugin hooks are the governance layer under test. On CC a plugin 'review' decision surfaces as an interactive ask (friction), NOT a hard deny — contrast with OpenCode.",
+  "plugin_enabled": true,
+  "policy_path": "../../plugins/agt-governance/config/default-policy.json",
+  "policy_profile": "default",
+  "settings": {
+    "permissions": {
+      "defaultMode": "default",
+      "deny": [],
+      "ask": [],
+      "allow": []
+    }
+  }
+}

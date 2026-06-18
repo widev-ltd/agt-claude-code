@@ -1,0 +1,14 @@
+{
+  "name": "agt-governance-marketplace",
+  "owner": {
+    "name": "WiDev Ltd"
+  },
+  "description": "Agent Governance Toolkit policy enforcement for Claude Code. Independent project by WiDev Ltd — not affiliated with or endorsed by Microsoft.",
+  "plugins": [
+    {
+      "name": "agt-governance",
+      "source": "./plugins/agt-governance",
+      "description": "Runtime policy enforcement, prompt-injection scanning, MCP tool-poisoning detection, and tamper-evident (not tamper-proof) audit logging for Claude Code. Adapts Microsoft's Agent Governance Toolkit (MIT); independent project, not affiliated with or endorsed by Microsoft."
+    }
+  ]
+}

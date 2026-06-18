@@ -1,0 +1,18 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log
+
+# Runtime credentials / local env — NEVER commit (defense-in-depth; the canonical
+# secrets file lives at the workspace root, outside any repo).
+.env.local
+*.env.local
+.env
+
+# The vendored AGT SDK under plugins/agt-governance/vendor/ is intentionally
+# committed to git -- that is what lets users install the plugin without npm.
+# These negations keep it tracked even if a global gitignore excludes
+# node_modules. If `git status` still does not show the vendor files, run:
+#   git add -f plugins/agt-governance/vendor
+!plugins/agt-governance/vendor/agent-governance-sdk/node_modules/
+!plugins/agt-governance/vendor/agent-governance-sdk/node_modules/**
