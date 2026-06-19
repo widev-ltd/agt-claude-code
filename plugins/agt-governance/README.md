@@ -40,8 +40,8 @@ each in `default-policy.json`; `mode: "advisory"` warns, `mode: "enforce"` block
 | **Exfiltration** (`exfilPolicies`) | enforce | Session-aware: tracks credential *values* seen in tool output, then blocks an outbound request (WebFetch/curl) that embeds one — the read-secret-then-send-it pattern. |
 | **Rate-limit** (`rateLimitPolicies`) | advisory | Per-session, per-tool call budgets (default Bash 150/h, WebFetch 50/h, 500 total). |
 | **Content-safety** (`contentSafetyPolicies`) | advisory | Scans tool output for harmful-instruction / jailbreak / credential-social-engineering content; optional external API (e.g. Azure AI Content Safety). |
-| **Dependency** (`dependencyPolicies`) | advisory | Supply-chain hygiene over a skill's / install command's dependencies — typosquat, unpinned, denied package, non-registry/editable source, untrusted index, npm install-scripts, license — across Python (PEP 723 inline, requirements, pyproject) and Node (package.json, lockfiles). See below. |
-| **Skill** (`skillPolicies`) | advisory | Governs a skill before it runs: integrity attestation, dangerous-pattern / secret / prompt-injection / capability-profile scans, source allowlist, and the **scan-once / verify-cheaply attestation** that drives the transitive CVE gate. See below. |
+| **Dependency** (`dependencyPolicies`) | enforce | Supply-chain hygiene over a skill's / install command's dependencies — typosquat, unpinned, denied package, non-registry/editable source, untrusted index, npm install-scripts, license — across Python (PEP 723 inline, requirements, pyproject) and Node (package.json, lockfiles). See below. |
+| **Skill** (`skillPolicies`) | enforce | Governs a skill before it runs: integrity attestation, dangerous-pattern / secret / prompt-injection / capability-profile scans, source allowlist, and the **scan-once / verify-cheaply attestation** that drives the transitive CVE gate. See below. |
 
 ## Skill & dependency supply-chain governance
 
