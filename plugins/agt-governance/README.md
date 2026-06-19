@@ -66,6 +66,14 @@ form, a bare-import `.js` with no manifest), coverage is **`unavailable`** → t
 enforce gate treats the skill as **unverified = unsafe** (review/deny). It is never
 stamped clean on an unscanned set — there is no false-clean.
 
+**Running the proactive audit.** Run it ahead of a skill's first use so the
+runtime gate finds a fresh attestation (a cheap cache hit) instead of stopping to
+review:
+
+```bash
+node scripts/skills-audit.mjs <skill-dir> [<skill-dir> ...] [--scanner trivy|osv-scanner|pip-audit]
+```
+
 **Tooling.** The proactive audit needs `uv` (Python) and/or `npm` (Node) plus a
 scanner (`trivy`/`osv-scanner`/`pip-audit`) on `PATH`. Their absence fails safe
 (coverage `unavailable`), it does not silently pass. The runtime gate spawns no
@@ -178,6 +186,39 @@ load, the plugin **fails closed** (denies tool calls) by design.
 > verbatim, grant trust via `AGT_TRUST_PROJECT_POLICY=1` or the
 > `trusted-projects.json` allowlist. A per-*user* policy at
 > `<CLAUDE_PLUGIN_DATA>/policy.json` is trusted (it's in your own data dir).
+
+### Skill & dependency policy keys
+
+Both supply-chain extensions take a `mode` (`advisory` warns / `enforce` blocks)
+and merge over the shipped defaults. The useful knobs (verified field names):
+
+```jsonc
+"dependencyPolicies": {
+  "mode": "enforce",
+  "requirePinned": true,                 // unpinned spec → finding
+  "deny": ["evil-pkg"],                  // package names always denied
+  "deniedLicenses": ["agpl"],            // license deny list
+  "severityThreshold": "medium",         // min severity that escalates
+  "allowedIndexes": ["https://pypi.org/simple"]   // [] = any index OK
+}
+"skillPolicies": {
+  "mode": "enforce",
+  "allowedSources": ["https://trusted-marketplace.example/"],  // origin allowlist ([] = any)
+  "capabilityProfile": {                 // operator budget — the HARD ceiling (false = forbid)
+    "maxNetwork": true, "maxSubprocess": true, "maxFsWrite": false, "maxSecretRead": false
+  },
+  "severityThreshold": "high",           // min finding severity that escalates (default high)
+  "maxAgeMs": 604800000                  // attestation re-audit window (default 7 days)
+}
+```
+
+**Capability least-privilege.** A skill declares what it may do in its `SKILL.md`
+frontmatter — `allowed-capabilities: [network, subprocess, fs-write, secrets]`
+(aliases accepted; flow-list or block-list form). A capability **used but not
+declared** — or declared but forbidden by the operator `capabilityProfile` budget
+— is flagged. The budget is the hard ceiling: a self-declaration can never grant a
+capability the operator set to `false`. This is the control behind the benchmark's
+100% skill-capability score (see `experiment/supplychain/BENCHMARK.md`).
 
 ### Audit log
 
