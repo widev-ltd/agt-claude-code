@@ -163,6 +163,10 @@ async function handleEvent(event, state, input) {
         {
           toolName: input?.tool_name,
           toolResult: input?.tool_response,
+          // The original command + cwd let inspectToolResult record a
+          // `user-approved` skill attestation when an approved skill ran.
+          toolArgs: input?.tool_input,
+          cwd: input?.cwd,
         },
         invocation,
       );
