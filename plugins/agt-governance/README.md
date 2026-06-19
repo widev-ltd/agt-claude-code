@@ -31,7 +31,7 @@ non-repudiation.
 
 ## Governance extensions
 
-Beyond the four core hooks, the policy enables four additional layers (configure
+Beyond the four core hooks, the policy enables six additional layers (configure
 each in `default-policy.json`; `mode: "advisory"` warns, `mode: "enforce"` blocks):
 
 | Extension | Default | What it does |
@@ -40,6 +40,37 @@ each in `default-policy.json`; `mode: "advisory"` warns, `mode: "enforce"` block
 | **Exfiltration** (`exfilPolicies`) | enforce | Session-aware: tracks credential *values* seen in tool output, then blocks an outbound request (WebFetch/curl) that embeds one — the read-secret-then-send-it pattern. |
 | **Rate-limit** (`rateLimitPolicies`) | advisory | Per-session, per-tool call budgets (default Bash 150/h, WebFetch 50/h, 500 total). |
 | **Content-safety** (`contentSafetyPolicies`) | advisory | Scans tool output for harmful-instruction / jailbreak / credential-social-engineering content; optional external API (e.g. Azure AI Content Safety). |
+| **Dependency** (`dependencyPolicies`) | advisory | Supply-chain hygiene over a skill's / install command's dependencies — typosquat, unpinned, denied package, non-registry/editable source, untrusted index, npm install-scripts, license — across Python (PEP 723 inline, requirements, pyproject) and Node (package.json, lockfiles). See below. |
+| **Skill** (`skillPolicies`) | advisory | Governs a skill before it runs: integrity attestation, dangerous-pattern / secret / prompt-injection / capability-profile scans, source allowlist, and the **scan-once / verify-cheaply attestation** that drives the transitive CVE gate. See below. |
+
+## Skill & dependency supply-chain governance
+
+Skills are third-party code + third-party dependencies executing inside the agent.
+This layer scans a skill **before it is trusted** and **stamps** it so it isn't
+re-scanned every run. Two tiers:
+
+- **Tier 1 — runtime (fast, in-process, no network):** on a skill invocation or a
+  dependency-bearing command, parse the manifests (PEP 723 inline / requirements /
+  pyproject / package.json / lockfiles), run metadata hygiene, and look up the
+  skill's **attestation**. Additive-only — it can add context, raise to review, or
+  deny; it never downgrades the base decision and never blocks the hot path.
+- **Tier 2 — proactive (`skills audit`, off the hot path):** resolves the **full
+  transitive dependency tree** (`uv` for Python incl. PEP 723 inline, `npm` for
+  Node) and runs an auto-detected scanner (**trivy / osv-scanner / pip-audit**) for
+  known CVEs, then writes a `scanned` attestation. A later run is a cheap cache hit.
+
+**The security guarantee (fail-safe).** A skill is allowed silently **only** when
+its dependencies were actually resolved transitively **and** scanned clean. If they
+cannot be (no resolver/scanner installed, a resolver error, an unresolvable inline
+form, a bare-import `.js` with no manifest), coverage is **`unavailable`** → the
+enforce gate treats the skill as **unverified = unsafe** (review/deny). It is never
+stamped clean on an unscanned set — there is no false-clean.
+
+**Tooling.** The proactive audit needs `uv` (Python) and/or `npm` (Node) plus a
+scanner (`trivy`/`osv-scanner`/`pip-audit`) on `PATH`. Their absence fails safe
+(coverage `unavailable`), it does not silently pass. The runtime gate spawns no
+scanner. Measured detection numbers + methodology:
+[`experiment/supplychain/BENCHMARK.md`](../../experiment/supplychain/BENCHMARK.md).
 
 **Session state & the per-event process model.** Claude Code runs each hook as a
 **fresh process**, so the stateful extensions (exfil, rate-limit) persist their
