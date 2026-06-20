@@ -40,45 +40,63 @@ each in `default-policy.json`; `mode: "advisory"` warns, `mode: "enforce"` block
 | **Exfiltration** (`exfilPolicies`) | enforce | Session-aware: tracks credential *values* seen in tool output, then blocks an outbound request (WebFetch/curl) that embeds one — the read-secret-then-send-it pattern. |
 | **Rate-limit** (`rateLimitPolicies`) | advisory | Per-session, per-tool call budgets (default Bash 150/h, WebFetch 50/h, 500 total). |
 | **Content-safety** (`contentSafetyPolicies`) | advisory | Scans tool output for harmful-instruction / jailbreak / credential-social-engineering content; optional external API (e.g. Azure AI Content Safety). |
-| **Dependency** (`dependencyPolicies`) | enforce | Supply-chain hygiene over a skill's / install command's dependencies — typosquat, unpinned, denied package, non-registry/editable source, untrusted index, npm install-scripts, license — across Python (PEP 723 inline, requirements, pyproject) and Node (package.json, lockfiles). See below. |
+| **Dependency** (`dependencyPolicies`) | enforce | Deterministic supply-chain hygiene a CVE scanner is blind to — denied package, non-registry/editable source, untrusted index (dependency-confusion), npm install-scripts — across Python (PEP 723 inline, requirements, pyproject) and Node (package.json, lockfiles). The transitive **CVE** scan is delegated to trivy/osv (Tier-2). See below. |
 | **Skill** (`skillPolicies`) | enforce | Governs a skill before it runs: integrity attestation, dangerous-pattern / secret / prompt-injection / capability-profile scans, source allowlist, and the **scan-once / verify-cheaply attestation** that drives the transitive CVE gate. See below. |
 
 ## Skill & dependency supply-chain governance
 
 Skills are third-party code + third-party dependencies executing inside the agent.
-This layer scans a skill **before it is trusted** and **stamps** it so it isn't
-re-scanned every run. Two tiers:
+Before a skill runs, this layer resolves its **full transitive dependency tree**
+(`uv` for Python incl. PEP 723 inline, `npm` for Node) and CVE-scans it
+(**trivy / osv-scanner / pip-audit**), then **stamps** the result so it isn't
+re-scanned every run. The stamp is what the gate trusts — and there are **two trust
+tiers**, because a stamp the scanned code itself can forge is worthless against a
+malicious skill:
 
-- **Tier 1 — runtime (fast, in-process, no network):** on a skill invocation or a
-  dependency-bearing command, parse the manifests (PEP 723 inline / requirements /
-  pyproject / package.json / lockfiles), run metadata hygiene, and look up the
-  skill's **attestation**. Additive-only — it can add context, raise to review, or
-  deny; it never downgrades the base decision and never blocks the hot path.
-- **Tier 2 — proactive (`skills audit`, off the hot path):** resolves the **full
-  transitive dependency tree** (`uv` for Python incl. PEP 723 inline, `npm` for
-  Node) and runs an auto-detected scanner (**trivy / osv-scanner / pip-audit**) for
-  known CVEs, then writes a `scanned` attestation. A later run is a cheap cache hit.
+- **CI-signed (strong, durable).** A signer *outside the agent's box* (CI / HSM)
+  scans the skill and — only if it PASSES — signs the attestation with an Ed25519
+  private key the agent machine never holds. The signed attestation ships
+  **alongside the skill** (`.agt-attestation.json`, excluded from the integrity
+  hash). The plugin **verifies** it with the trusted **public key**, which is
+  *delivered out of band* and configured in `skillPolicies.trustedSigners` (a PEM
+  or a file path — never bundled in the plugin). A local attacker cannot forge this:
+  they lack the private key. **A signature IS the pass — CI never signs a failing
+  skill**, so the gate does not re-judge a signed stamp.
+- **Local 1-day grace (weak, default).** A skill with no valid CI signature is
+  **scanned locally on first use**; if it passes, it gets a stamp valid for **1
+  day**, so it's usable for a day, then must be re-scanned (or CI-signed). This tier
+  is **forgeable but time-boxed** — a local writer could plant a 1-day stamp; the
+  expiry caps the exposure. Set `skillPolicies.requireSignature: true` for **strict
+  mode**, which drops this tier entirely (only CI-signed skills run).
 
-**The security guarantee (fail-safe).** A skill is allowed silently **only** when
-its dependencies were actually resolved transitively **and** scanned clean. If they
-cannot be (no resolver/scanner installed, a resolver error, an unresolvable inline
-form, a bare-import `.js` with no manifest), coverage is **`unavailable`** → the
-enforce gate treats the skill as **unverified = unsafe** (review/deny). It is never
-stamped clean on an unscanned set — there is no false-clean.
+**The CI signer is a SEPARATE tool, run by CI — never installed on the agent box:**
 
-**Running the proactive audit.** Run it ahead of a skill's first use so the
-runtime gate finds a fresh attestation (a cheap cache hit) instead of stopping to
-review:
+```bash
+# in CI, with the PRIVATE key that never touches an agent machine:
+node tools/skill-signer/sign.mjs <skill-dir> --key <ci-private.pem> [--threshold high]
+#   PASS → writes <skill-dir>/.agt-attestation.json (exit 0)
+#   FAIL (CVE ≥ threshold) → NOT signed (exit 1) — there is no signed-but-vulnerable
+```
+
+For local/dev use without CI, the proactive audit produces the 1-day local stamp
+ahead of time (so the first real use is a cache hit, not an inline scan):
 
 ```bash
 node scripts/skills-audit.mjs <skill-dir> [<skill-dir> ...] [--scanner trivy|osv-scanner|pip-audit]
 ```
 
-**Tooling.** The proactive audit needs `uv` (Python) and/or `npm` (Node) plus a
-scanner (`trivy`/`osv-scanner`/`pip-audit`) on `PATH`. Their absence fails safe
-(coverage `unavailable`), it does not silently pass. The runtime gate spawns no
-scanner. Measured detection numbers + methodology:
-[`experiment/supplychain/BENCHMARK.md`](../../experiment/supplychain/BENCHMARK.md).
+**Fail-safe behavior (not a guarantee — a guardrail).** A skill is allowed silently
+**only** when its deps were actually resolved transitively **and** scanned clean (or
+carry a valid CI signature). If they can't be (no resolver/scanner installed, a
+resolver error, an unresolvable inline form, a bare-import `.js` with no manifest),
+coverage is **`unavailable`** → **unverified = unsafe** (review/deny). It is never
+stamped clean on an unscanned set — no false-clean. **What this does NOT do:** the
+scan catches *known* CVEs + *known* patterns (not novel/zero-day); the local 1-day
+tier is forgeable; and a skill that runs once with your privileges can subvert the
+local guard. The CI-signed tier is the only one resistant to a local forger; for a
+true boundary you need OS-level isolation, which this is not. Methodology + measured
+numbers: [`experiment/supplychain/BENCHMARK.md`](../../experiment/supplychain/BENCHMARK.md)
+(a self-graded regression suite, not an independent benchmark — see its header).
 
 **Session state & the per-event process model.** Claude Code runs each hook as a
 **fresh process**, so the stateful extensions (exfil, rate-limit) persist their
@@ -195,9 +213,7 @@ and merge over the shipped defaults. The useful knobs (verified field names):
 ```jsonc
 "dependencyPolicies": {
   "mode": "enforce",
-  "requirePinned": true,                 // unpinned spec → finding
   "deny": ["evil-pkg"],                  // package names always denied
-  "deniedLicenses": ["agpl"],            // license deny list
   "severityThreshold": "medium",         // min severity that escalates
   "allowedIndexes": ["https://pypi.org/simple"]   // [] = any index OK
 }
