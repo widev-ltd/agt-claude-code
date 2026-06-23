@@ -1,0 +1,85 @@
+# CI for agt-claude-code (the canonical governance engine + benchmark harnesses).
+#
+# This repo is the SOURCE OF TRUTH for the shared engine. The CI gates here are:
+#   1. the engine selftests (run-selftests.mjs, which also runs parity-check)
+#   2. an explicit parity-check (self-consistency in a single-repo checkout;
+#      full 3-way byte-parity is only meaningful in the local multi-repo
+#      workspace — see the comment on that step)
+#   3. the supply-chain (SC) determinism seal: re-score, re-check the 3c63a5a7
+#      seal, and prove matrix-sc.csv did not drift
+#   4. the main benchmark determinism gate: re-score for host=cc and prove
+#      matrix.csv did not drift
+#
+# Network-dependent harnesses (experiment/independent, experiment/.../live) are
+# intentionally NOT in this path: this build machine class can have TLS
+# interception that breaks Python/certifi-based scanners, and the live track is
+# credential-gated. CI stays offline and deterministic.
+#
+# Node matrix: 18 + 22. The Claude Code plugin scripts are plain Node ESM with
+# no engines floor declared (no package.json in the plugin), so we test the
+# practical floor (18) and the version OpenCode targets (22).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 1) Engine selftests. run-selftests.mjs auto-discovers every selftest-*.mjs
+      #    in the scripts dir AND runs parity-check.mjs as its final step, so this
+      #    one command exercises the whole engine plus parity.
+      - name: Engine selftests (+ parity as final step)
+        run: node plugins/agt-governance/scripts/run-selftests.mjs
+
+      # 2) Parity check, run explicitly so its pass/fail table is its own CI step.
+      #    NOTE: in a single-repo checkout the gitignored mirror
+      #    (experiment/plugin-src) and the OpenCode sibling repo are NOT present,
+      #    so this enforces parity only across the copies that exist (here:
+      #    canonical alone -> a self-consistency/presence check). Full 3-way
+      #    byte-parity is enforced locally before commit; the authoritative
+      #    cross-repo guarantee in CI is the OC repo's "rebuild + git diff" bundle
+      #    gate plus each repo's own selftests.
+      - name: Shared-engine parity check
+        run: node plugins/agt-governance/scripts/parity-check.mjs
+
+      # 3) Supply-chain determinism seal. Re-score the SC corpus, verify the
+      #    combined seal (3c63a5a7) still matches, and prove the scored matrix is
+      #    byte-identical to the committed one. Any drift in detectors, corpus, or
+      #    scoring fails here.
+      - name: Supply-chain determinism gate
+        working-directory: experiment/supplychain
+        run: |
+          node harness/score-sc.mjs
+          node harness/make-hash-sc.mjs --check
+          git diff --exit-code results-sc/matrix-sc.csv
+
+      # 4) Main benchmark determinism gate. Re-score the deterministic track for
+      #    host=cc and prove matrix.csv is byte-identical to the committed one.
+      #    (matrix.csv intentionally excludes wall-clock/latency, so it is a sound
+      #    determinism target; the timestamped raw JSON is gitignored.)
+      - name: Main benchmark determinism gate
+        working-directory: experiment
+        run: |
+          node harness/score.mjs --host cc
+          git diff --exit-code results/matrix.csv

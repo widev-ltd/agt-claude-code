@@ -40,6 +40,7 @@ each in `default-policy.json`; `mode: "advisory"` warns, `mode: "enforce"` block
 | **Exfiltration** (`exfilPolicies`) | enforce | Session-aware: tracks credential *values* seen in tool output, then blocks an outbound request (WebFetch/curl) that embeds one — the read-secret-then-send-it pattern. |
 | **Rate-limit** (`rateLimitPolicies`) | advisory | Per-session, per-tool call budgets (default Bash 150/h, WebFetch 50/h, 500 total). |
 | **Content-safety** (`contentSafetyPolicies`) | advisory | Scans tool output for harmful-instruction / jailbreak / credential-social-engineering content; optional external API (e.g. Azure AI Content Safety). |
+| **Intent judge** (`intentJudgePolicies`) | **disabled** | Optional LLM-as-judge: assesses the *intent* of a tool call (benign/suspicious/malicious) and feeds it into the decision. Additive-only (raises to review/deny, never downgrades a deterministic deny); fail-safe to the deterministic verdict on judge error/timeout. Off by default (per-call LLM cost/latency, non-deterministic). See below. |
 | **Dependency** (`dependencyPolicies`) | enforce | Deterministic supply-chain hygiene a CVE scanner is blind to — denied package, non-registry/editable source, untrusted index (dependency-confusion), npm install-scripts — across Python (PEP 723 inline, requirements, pyproject) and Node (package.json, lockfiles). The transitive **CVE** scan is delegated to trivy/osv (Tier-2). See below. |
 | **Skill** (`skillPolicies`) | enforce | Governs a skill before it runs: integrity attestation, dangerous-pattern / secret / prompt-injection / capability-profile scans, source allowlist, and the **scan-once / verify-cheaply attestation** that drives the transitive CVE gate. See below. |
 
@@ -220,13 +221,30 @@ and merge over the shipped defaults. The useful knobs (verified field names):
 "skillPolicies": {
   "mode": "enforce",
   "allowedSources": ["https://trusted-marketplace.example/"],  // origin allowlist ([] = any)
+  "trustedSigners": ["/etc/agt/ci-public.pem"],  // CI public key(s): PEM or file path, delivered out of band
+  // requireSignature DEFAULTS to true when trustedSigners is set (configuring CI
+  // signing opts you out of the forgeable local tier). Set false to keep the local
+  // 1-day scan fallback alongside CI signatures.
+  "requireSignature": true,
+  "revokedKeyIds": [],                    // revoke a compromised signer by its --key-id (stamps stay rejected)
+  "revokedAttestationKeys": [],           // surgically revoke individual attestations by integrity key
   "capabilityProfile": {                 // operator budget — the HARD ceiling (false = forbid)
     "maxNetwork": true, "maxSubprocess": true, "maxFsWrite": false, "maxSecretRead": false
   },
   "severityThreshold": "high",           // min finding severity that escalates (default high)
-  "maxAgeMs": 604800000                  // attestation re-audit window (default 7 days)
+  "maxAgeMs": 604800000,                 // CI-signed stamp max age (default 7 days; a stamp's embedded notAfter, if tighter, wins)
+  "localGraceMs": 86400000               // unsigned local-scan stamp window (default 1 day)
 }
 ```
+
+**Signed-stamp trust (hardened).** A CI-signed stamp is honored only if it verifies
+under a `trustedSigners` key, is bound to the skill's current files, is within its
+validity window (the signer's embedded `notAfter`, or `maxAgeMs`, whichever is
+tighter), and its `keyId`/integrity-key is **not** in the revocation lists. A
+revoked, expired, not-yet-valid, or unverifiable stamp is treated as untrusted
+(review/deny) — never downgraded to allow. Stamp skills in CI with
+`tools/skill-signer/sign.mjs --key-id <id> --valid-days <N>`; revoke by adding the
+id to `revokedKeyIds`. Full runbook: `tools/skill-signer/KEY-MANAGEMENT.md`.
 
 **Capability least-privilege.** A skill declares what it may do in its `SKILL.md`
 frontmatter — `allowed-capabilities: [network, subprocess, fs-write, secrets]`
@@ -235,6 +253,37 @@ declared** — or declared but forbidden by the operator `capabilityProfile` bud
 — is flagged. The budget is the hard ceiling: a self-declaration can never grant a
 capability the operator set to `false`. This is the control behind the benchmark's
 100% skill-capability score (see `experiment/supplychain/BENCHMARK.md`).
+
+### Intent judge (optional LLM-as-judge — off by default)
+
+An opt-in layer that asks an LLM to assess the **intent** of a tool call —
+benign / suspicious / malicious — and feeds that verdict into the decision. It
+complements the deterministic detectors: those catch known shapes, the judge can
+flag a novel or obfuscated action whose *intent* is hostile with no matching
+pattern. **Disabled by default** (per-call LLM cost + latency, non-deterministic).
+
+```jsonc
+"intentJudgePolicies": {
+  "enabled": true,
+  "mode": "advisory",               // advisory = a context note; enforce = block on malicious / review on suspicious
+  "provider": "anthropic",          // anthropic | openai | custom
+  "apiKeyEnv": "ANTHROPIC_API_KEY", // env var holding the key — NEVER store the key in policy
+  "model": "claude-haiku-4-5-20251001",
+  "timeoutMs": 4000,
+  "failClosed": false,              // judge error/timeout: false → degrade to deterministic; true → raise to review
+  "triggerTools": ["Bash", "WebFetch", "WebSearch", "Task"]  // [] = judge every call (scope to bound cost)
+}
+```
+
+**Invariants (do not weaken):** additive-only — the judge can raise an `allow` to
+`review`/`deny` but **never** downgrades a deterministic `deny`/`review` (the gate
+skips it once the base decision is already deny). Fail-safe — a judge error,
+timeout, or missing key degrades to the deterministic verdict (or `review` if
+`failClosed`), and never throws into the decision. **Honest limits:** it is
+non-deterministic, defeatable (the judge's own input can be prompt-injected), and
+costs an API call per judged tool — defense-in-depth, not a guarantee. Start in
+`advisory`, scope `triggerTools`, and move to `enforce` only after validating
+precision on your workload.
 
 ### Audit log
 

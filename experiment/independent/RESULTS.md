@@ -61,10 +61,13 @@ since they're deterministic, not heuristic.
 
 ## 3. Why typosquat/malware-name detection was cut (not just tuned)
 
-`catch-malicious.mjs` originally showed the offline name check catching only **2.6%
-(PyPI) / 0% (npm)** of real OSSF malware names — structurally, a name check only
-catches typosquats of popular packages, and most real malware uses original campaign
-names. Two findings sealed the decision to cut it:
+`catch-malicious.mjs` *before the cut* showed the offline name check catching only
+**2.6% (PyPI) / 0% (npm)** of real OSSF malware names — structurally, a name check
+only catches typosquats of popular packages, and most real malware uses original
+campaign names. **After the cut the check is gone, so it now catches 0% / 0% by
+construction** — running `catch-malicious.mjs` against the shipped code reports 0/0.
+That 2.6% was the high-water mark of a heuristic not worth keeping. Two findings
+sealed the decision to cut it:
 
 - **The scanner ecosystem doesn't reliably do it either.** osv-scanner flagged a
   CVE package (`requests@2.19.0` → 7 advisories) but **not** famous historical

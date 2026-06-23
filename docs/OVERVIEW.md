@@ -28,6 +28,7 @@ with **no `npm` step**.
 | **Prompt injection** | Scans each prompt for injection / context-poisoning; injects a standing guardrail context; blocks (rewrites) prompts that look like attacks. |
 | **Tool-output poisoning** | Scans tool output for injected instructions and warns the model that flagged output is untrusted. |
 | **MCP tool poisoning** | Every `mcp__*` tool call is scanned for poisoning/typosquatting automatically — no policy entry needed. |
+| **Skill / supply-chain governance** | Gates an Agent Skill **before it runs**: integrity attestation, dangerous-pattern / secret / prompt-injection / capability-profile scans, and a transitive dependency CVE gate (known-CVE scan delegated to trivy/osv). Trust comes in **two tiers** — a strong CI/Ed25519 signature or a weak, time-boxed local stamp. Enforce-by-default. See [USAGE.md](USAGE.md#trusting-skills--two-tiers) and [CONFIGURATION.md](CONFIGURATION.md#skill--dependency-supply-chain-governance). |
 | **Auditability** | Appends every decision to a persistent, SHA-256 hash-chained audit log that survives plugin updates. |
 
 ## How it works (architecture)
@@ -62,6 +63,13 @@ tool call / prompt ──► AGT policy engine ──► allow / ask / deny ─�
 - **`ask` is a real interactive prompt.** Unlike the OpenCode port, Claude Code's
   `PreToolUse` `deny` genuinely blocks and `ask` genuinely prompts you — so
   "reviewed" tools run once you approve them.
+- **Cross-seat note (if you also run the OpenCode seat).** The two seats resolve
+  a `review` decision **differently**: Claude Code asks/prompts you (you can
+  approve and proceed), whereas the OpenCode companion currently **denies**
+  headless because its interactive-permission hook does not reliably fire. The
+  same policy is therefore *more permissive in practice on Claude Code* — don't
+  be surprised that a `review`-tier tool runs here after approval but is blocked
+  outright under OpenCode.
 - **The audit log is tamper-evident, not tamper-proof.** The hash chain detects
   edits/insertions/reordering and tail-truncation, but it is keyless: anyone who
   can write the log file can recompute a valid chain. Treat it as an integrity

@@ -31,6 +31,16 @@ const summary = await skills.auditSkillDir(skillDir, { skillPolicy: compiled.ski
 const record = att.readAttestation(summary.key);
 if (!record) { console.error("ci-sign: scan produced no record"); process.exit(1); }
 
+// Fail LOUDLY if no real scan happened. A `coverage:"unavailable"` record (no
+// resolver/scanner on PATH) carries no findings — signing it would make the demo's
+// "tamper" arm vacuous (flipping an already-empty finding list changes nothing the
+// signature didn't already cover). A real CI signer must not vouch for an unscanned
+// skill, so neither does this demo: it refuses rather than produce a hollow stamp.
+if (record.scanCoverage !== "transitive") {
+  console.error(`ci-sign: scan coverage is "${record.scanCoverage}", not "transitive" — a real scan did not run (need uv/npm + trivy/osv-scanner/pip-audit on PATH). Refusing to sign an unscanned skill.`);
+  process.exit(1);
+}
+
 // Sign with the CI PRIVATE key using the SHIPPED signer (production code path).
 const signed = att.signAttestationRecord(record, readFileSync(join(here, ".keys", "ci-private.pem"), "utf8"), "ci");
 

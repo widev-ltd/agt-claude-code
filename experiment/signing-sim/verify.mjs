@@ -43,4 +43,4 @@ const compiled = pol.compilePolicy({ skillPolicies: { enabled: true, mode: "enfo
 const d = att.decideFromFindings(record, compiled.skill);
 const verdict = d.effect === "allow" ? "ALLOW" : d.effect === "deny" ? "DENY" : "REVIEW";
 console.log(`VERDICT: ${verdict} — ${d.reason}`);
-console.log(`  (signature OK, signer=${signer}, coverage=${record.scanCoverage}, findings=${(record.rawFindings ?? []).length})`);
+console.log(`  (signature OK, signer=${record.signer}, coverage=${record.scanCoverage}, findings=${(record.rawFindings ?? []).length})`);

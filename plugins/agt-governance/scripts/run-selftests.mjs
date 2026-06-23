@@ -24,4 +24,24 @@ for (const t of tests) {
 console.log(
   `\n${failed.length === 0 ? `ALL ${tests.length} SELFTESTS PASS` : `${failed.length} FAILED: ${failed.join(", ")}`}`,
 );
-process.exit(failed.length === 0 ? 0 : 1);
+
+// ── Final step: shared-engine parity ─────────────────────────────────────────
+// After the selftests, also verify the 11 shared modules are byte-identical
+// across the canonical dir, the gitignored mirror, and the OC plugin source.
+// parity-check.mjs resolves its own paths from its file location, so this works
+// regardless of the cwd `run-selftests.mjs` was launched from. Parity failure is
+// reported as a SEPARATE concern (not folded into the selftest tally) and on its
+// own causes a non-zero exit.
+const parity = spawnSync(process.execPath, [join(HERE, "parity-check.mjs")], { encoding: "utf8" });
+const parityOk = parity.status === 0;
+console.log("\n----- shared-engine parity -----");
+if (parity.stdout) process.stdout.write(parity.stdout);
+if (!parityOk && parity.stderr) process.stderr.write(parity.stderr);
+console.log(
+  parityOk
+    ? "PARITY CHECK: PASS"
+    : "PARITY CHECK: FAIL — shared modules drifted across copies (see table above; run `node sync-shared.mjs`).",
+);
+
+// Exit non-zero if EITHER the selftests OR the parity check failed.
+process.exit(failed.length === 0 && parityOk ? 0 : 1);
